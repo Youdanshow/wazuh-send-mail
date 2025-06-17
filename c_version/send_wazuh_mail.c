@@ -75,9 +75,9 @@ static void parse_alert(const char *text, alert_info *info)
         strcpy(info->logfile, "Unknown");
     if(regex_extract(text, "([0-9]{4} [A-Z][a-z]{2} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})", info->time, sizeof(info->time)) != 0)
         strcpy(info->time, "Unknown");
-    if(regex_extract(text, "Rule: [0-9]+ \(level ([0-9]+)\)", info->level, sizeof(info->level)) != 0)
+    if(regex_extract(text, "Rule: [0-9]+ \\(level ([0-9]+)\\)", info->level, sizeof(info->level)) != 0)
         strcpy(info->level, "Unknown");
-    if(regex_extract(text, "Rule: [0-9]+ \(level [0-9]+\) -> '([^']*)'", info->rule_desc, sizeof(info->rule_desc)) != 0)
+    if(regex_extract(text, "Rule: [0-9]+ \\(level [0-9]+\\) -> '([^']*)'", info->rule_desc, sizeof(info->rule_desc)) != 0)
         strcpy(info->rule_desc, "Wazuh Alert");
     snprintf(info->subject, sizeof(info->subject), "[Wazuh] %s", info->rule_desc);
 }
@@ -96,7 +96,7 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
     plain = malloc(log_len + 64);
     html = malloc(log_len + 512);
     if(!plain || !html) { free(plain); free(html); return NULL; }
-    strncpy(plain, log, log_len);
+    memcpy(plain, log, log_len);
     plain[log_len] = '\0';
     if(truncated)
         strcat(plain, "\n\n[Log automatically truncated for email compatibility]");
