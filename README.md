@@ -30,6 +30,19 @@ To test manually you can run:
 
 Ensure your SMTP settings in `send_wazuh_mail.c` match your environment.
 
+### Configuration file
+
+The C program reads `wazuh-mail.conf` from `/opt/wazuh-mail` on startup.
+This file allows you to set the minimum alert level that triggers an
+email notification:
+
+```ini
+min_level=9
+```
+
+If the file is missing or the value cannot be parsed, level `9` is used
+by default.
+
 ## Enabling the service
 
 To run the mail notifier automatically, install one of the provided systemd

@@ -4,6 +4,7 @@
 #include <regex.h>
 #include <curl/curl.h>
 #include <time.h>
+#include <ctype.h>
 
 #define SMTP_SERVER "smtp.example.com"
 #define SMTP_PORT 25
@@ -12,6 +13,9 @@
 #define ALERT_FILE_PATH "/var/ossec/logs/alerts/alerts.log"
 
 #define MAX_LOG_LENGTH 15000
+#define CONFIG_FILE "/opt/wazuh-mail/wazuh-mail.conf"
+
+static int min_alert_level = 9;
 
 struct upload_status {
     size_t bytes_read;
@@ -35,6 +39,35 @@ static char *read_file(const char *path, size_t *out_len)
     fclose(f);
     if(out_len) *out_len = sz;
     return buf;
+}
+
+/* Load configuration, currently only min_level from CONFIG_FILE */
+static void load_config(void)
+{
+    FILE *f = fopen(CONFIG_FILE, "r");
+    if(!f) return; /* use default */
+
+    char line[64];
+    while(fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while(isspace((unsigned char)*p)) p++;
+        if(*p == '#' || *p == '\0')
+            continue;
+        if(strncmp(p, "min_level", 9) == 0) {
+            p += 9;
+            while(*p && (*p == ' ' || *p == '\t' || *p == '=')) p++;
+            int lvl = atoi(p);
+            if(lvl > 0)
+                min_alert_level = lvl;
+            break;
+        } else if(isdigit((unsigned char)*p)) {
+            int lvl = atoi(p);
+            if(lvl > 0)
+                min_alert_level = lvl;
+            break;
+        }
+    }
+    fclose(f);
 }
 
 /* Extract first capture group using regex */
@@ -193,7 +226,8 @@ static int process_alert(const char *alert)
     alert_info info = {0};
     parse_alert(alert, &info);
     int level = atoi(info.level);
-    if(level < 9) return 0; /* ignore low level */
+    if(level < min_alert_level)
+        return 0; /* ignore low level */
 
     size_t payload_len = 0;
     char *payload = build_email(&info, alert, &payload_len);
@@ -206,6 +240,7 @@ static int process_alert(const char *alert)
 
 int main(void)
 {
+    load_config();
     size_t len = 0;
     char *file_data = read_file(ALERT_FILE_PATH, &len);
     if(!file_data) {
