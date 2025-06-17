@@ -29,6 +29,31 @@ struct upload_status {
     const char *data;
 };
 
+/* Convert LF line endings to CRLF as required by SMTP */
+static char *normalize_newlines(const char *text)
+{
+    size_t len = strlen(text);
+    size_t extra = 0;
+    for(size_t i = 0; i < len; ++i) {
+        if(text[i] == '\n')
+            extra++;
+    }
+    char *out = malloc(len + extra + 1);
+    if(!out)
+        return NULL;
+    char *p = out;
+    for(size_t i = 0; i < len; ++i) {
+        if(text[i] == '\n') {
+            *p++ = '\r';
+            *p++ = '\n';
+        } else {
+            *p++ = text[i];
+        }
+    }
+    *p = '\0';
+    return out;
+}
+
 /* Load configuration from CONFIG_FILE */
 static void load_config(void)
 {
@@ -125,20 +150,30 @@ static void parse_alert(const char *text, alert_info *info)
 static char *build_email(const alert_info *info, const char *log, size_t *payload_len)
 {
     const char *boundary = "----=_wazuh_mail_boundary";
-    char *plain = NULL; char *html = NULL;
+    char *plain = NULL;
+    char *html = NULL;
     size_t log_len = strlen(log);
     int truncated = 0;
     if(log_len > MAX_LOG_LENGTH) {
         log_len = MAX_LOG_LENGTH;
         truncated = 1;
     }
-    plain = malloc(log_len + 64);
+
+    char *log_copy = malloc(log_len + 1);
+    if(!log_copy) return NULL;
+    memcpy(log_copy, log, log_len);
+    log_copy[log_len] = '\0';
+
+    char *normalized = normalize_newlines(log_copy);
+    if(!normalized) { free(log_copy); return NULL; }
+
+    size_t plain_extra = truncated ? strlen("\r\n\r\n[Log automatically truncated for email compatibility]") : 0;
+    plain = malloc(strlen(normalized) + plain_extra + 1);
     html = malloc(log_len + 512);
-    if(!plain || !html) { free(plain); free(html); return NULL; }
-    memcpy(plain, log, log_len);
-    plain[log_len] = '\0';
+    if(!plain || !html) { free(log_copy); free(normalized); free(plain); free(html); return NULL; }
+    strcpy(plain, normalized);
     if(truncated)
-        strcat(plain, "\n\n[Log automatically truncated for email compatibility]");
+        strcat(plain, "\r\n\r\n[Log automatically truncated for email compatibility]");
 
     snprintf(html, log_len + 512,
         "<html>\n"
@@ -154,8 +189,11 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
         "</div>\n%s"
         "</body></html>\n",
         info->level, info->rule_desc, info->time, info->hostname, info->logfile,
-        (int)log_len, log,
+        (int)log_len, log_copy,
         truncated ? "<p style=\"color:#888;margin-top:8px;\"><em>[Log automatically truncated for email compatibility]</em></p>" : "");
+
+    free(log_copy);
+    free(normalized);
 
     size_t size = strlen(info->subject) + strlen(plain) + strlen(html) + 512;
     char *payload = malloc(size);
