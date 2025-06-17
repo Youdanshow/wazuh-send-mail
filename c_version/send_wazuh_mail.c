@@ -4,14 +4,24 @@
 #include <regex.h>
 #include <curl/curl.h>
 #include <time.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
-#define SMTP_SERVER "smtp.example.com"
-#define SMTP_PORT 25
-#define EMAIL_FROM "wazuh@example.com"
-#define EMAIL_TO "support@example.com"
+#define DEFAULT_SMTP_SERVER "smtp.example.com"
+#define DEFAULT_SMTP_PORT 25
+#define DEFAULT_EMAIL_FROM "wazuh@example.com"
+#define DEFAULT_EMAIL_TO "support@example.com"
 #define ALERT_FILE_PATH "/var/ossec/logs/alerts/alerts.log"
 
 #define MAX_LOG_LENGTH 15000
+#define CONFIG_FILE "/opt/wazuh-mail/wazuh-mail.conf"
+
+static int min_alert_level = 9;
+static char smtp_server[128] = DEFAULT_SMTP_SERVER;
+static int smtp_port = DEFAULT_SMTP_PORT;
+static char email_from[128] = DEFAULT_EMAIL_FROM;
+static char email_to[128] = DEFAULT_EMAIL_TO;
 
 struct upload_status {
     size_t bytes_read;
@@ -19,22 +29,51 @@ struct upload_status {
     const char *data;
 };
 
-/* Helper to read entire file into memory */
-static char *read_file(const char *path, size_t *out_len)
+/* Load configuration from CONFIG_FILE */
+static void load_config(void)
 {
-    FILE *f = fopen(path, "r");
-    if(!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if(sz < 0) { fclose(f); return NULL; }
-    char *buf = malloc(sz + 1);
-    if(!buf) { fclose(f); return NULL; }
-    if(fread(buf, 1, sz, f) != (size_t)sz) { free(buf); fclose(f); return NULL; }
-    buf[sz] = '\0';
+    FILE *f = fopen(CONFIG_FILE, "r");
+    if(!f) return; /* use default */
+
+    char line[256];
+    while(fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while(isspace((unsigned char)*p)) p++;
+        if(*p == '#' || *p == '\0')
+            continue;
+        char *eq = strchr(p, '=');
+        if(!eq) continue;
+        *eq++ = '\0';
+        char *key = p;
+        char *value = eq;
+        while(*value && isspace((unsigned char)*value)) value++;
+        key[strcspn(key, " \t\r\n")] = '\0';
+        value[strcspn(value, "\r\n")] = '\0';
+
+        if(strcmp(key, "min_level") == 0) {
+            int lvl = atoi(value);
+            if(lvl > 0)
+                min_alert_level = lvl;
+        } else if(strcmp(key, "smtp_server") == 0) {
+            strncpy(smtp_server, value, sizeof(smtp_server) - 1);
+            smtp_server[sizeof(smtp_server)-1] = '\0';
+        } else if(strcmp(key, "smtp_port") == 0) {
+            int port = atoi(value);
+            if(port > 0)
+                smtp_port = port;
+        } else if(strcmp(key, "email_from") == 0) {
+            strncpy(email_from, value, sizeof(email_from) - 1);
+            email_from[sizeof(email_from)-1] = '\0';
+        } else if(strcmp(key, "email_to") == 0) {
+            strncpy(email_to, value, sizeof(email_to) - 1);
+            email_to[sizeof(email_to)-1] = '\0';
+        } else if(isdigit((unsigned char)*key)) {
+            int lvl = atoi(key);
+            if(lvl > 0)
+                min_alert_level = lvl;
+        }
+    }
     fclose(f);
-    if(out_len) *out_len = sz;
-    return buf;
 }
 
 /* Extract first capture group using regex */
@@ -71,13 +110,13 @@ static void parse_alert(const char *text, alert_info *info)
 {
     if(regex_extract(text, "[0-9]{4} [A-Z][a-z]{2} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} ([^ ]+)->", info->hostname, sizeof(info->hostname)) != 0)
         regex_extract(text, "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[+-][0-9]{2}:[0-9]{2})? ([^ ]+)", info->hostname, sizeof(info->hostname));
-    if(regex_extract(text, "->([^\\s]+)", info->logfile, sizeof(info->logfile)) != 0)
+    if(regex_extract(text, "->([^\\n]+?)\\s+Rule:", info->logfile, sizeof(info->logfile)) != 0)
         strcpy(info->logfile, "Unknown");
     if(regex_extract(text, "([0-9]{4} [A-Z][a-z]{2} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})", info->time, sizeof(info->time)) != 0)
         strcpy(info->time, "Unknown");
-    if(regex_extract(text, "Rule: [0-9]+ \(level ([0-9]+)\)", info->level, sizeof(info->level)) != 0)
+    if(regex_extract(text, "Rule: [0-9]+ \\(level ([0-9]+)\\)", info->level, sizeof(info->level)) != 0)
         strcpy(info->level, "Unknown");
-    if(regex_extract(text, "Rule: [0-9]+ \(level [0-9]+\) -> '([^']*)'", info->rule_desc, sizeof(info->rule_desc)) != 0)
+    if(regex_extract(text, "Rule: [0-9]+ \\(level [0-9]+\\) -> '([^']*)'", info->rule_desc, sizeof(info->rule_desc)) != 0)
         strcpy(info->rule_desc, "Wazuh Alert");
     snprintf(info->subject, sizeof(info->subject), "[Wazuh] %s", info->rule_desc);
 }
@@ -96,7 +135,7 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
     plain = malloc(log_len + 64);
     html = malloc(log_len + 512);
     if(!plain || !html) { free(plain); free(html); return NULL; }
-    strncpy(plain, log, log_len);
+    memcpy(plain, log, log_len);
     plain[log_len] = '\0';
     if(truncated)
         strcat(plain, "\n\n[Log automatically truncated for email compatibility]");
@@ -136,7 +175,7 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
              "Content-Type: text/html; charset=utf-8\r\n\r\n"
              "%s\r\n"
              "--%s--\r\n",
-             EMAIL_FROM, EMAIL_TO, info->subject, boundary,
+             email_from, email_to, info->subject, boundary,
              boundary, plain,
              boundary, html,
              boundary);
@@ -168,12 +207,16 @@ static int send_email_payload(const char *payload, size_t payload_len)
     if(!curl) return -1;
     CURLcode res = CURLE_OK;
     char url[256];
-    snprintf(url, sizeof(url), "smtp://%s:%d", SMTP_SERVER, SMTP_PORT);
+    snprintf(url, sizeof(url), "smtp://%s:%d", smtp_server, smtp_port);
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, "<" EMAIL_FROM ">");
+    char from[160];
+    snprintf(from, sizeof(from), "<%s>", email_from);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
 
     struct curl_slist *recipients = NULL;
-    recipients = curl_slist_append(recipients, "<" EMAIL_TO ">");
+    char to[160];
+    snprintf(to, sizeof(to), "<%s>", email_to);
+    recipients = curl_slist_append(recipients, to);
     curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
 
     struct upload_status upload_ctx = {0, payload_len, payload};
@@ -193,7 +236,8 @@ static int process_alert(const char *alert)
     alert_info info = {0};
     parse_alert(alert, &info);
     int level = atoi(info.level);
-    if(level < 9) return 0; /* ignore low level */
+    if(level < min_alert_level)
+        return 0; /* ignore low level */
 
     size_t payload_len = 0;
     char *payload = build_email(&info, alert, &payload_len);
@@ -206,38 +250,70 @@ static int process_alert(const char *alert)
 
 int main(void)
 {
-    size_t len = 0;
-    char *file_data = read_file(ALERT_FILE_PATH, &len);
-    if(!file_data) {
-        fprintf(stderr, "Failed to read %s\n", ALERT_FILE_PATH);
+    load_config();
+
+    FILE *f = fopen(ALERT_FILE_PATH, "r");
+    if(!f) {
+        fprintf(stderr, "Failed to open %s\n", ALERT_FILE_PATH);
         return 1;
     }
 
-    char *start = file_data;
-    char *line;
+    /* Start watching from the end of the file */
+    fseek(f, 0, SEEK_END);
+
     char *alert = NULL;
     size_t alert_len = 0;
-    for(line = strtok(start, "\n"); line; line = strtok(NULL, "\n")) {
-        if(strncmp(line, "** Alert", 8) == 0) {
-            if(alert) {
-                process_alert(alert);
-                free(alert);
-                alert = NULL;
-                alert_len = 0;
+    char line[4096];
+
+    while(1) {
+        if(fgets(line, sizeof(line), f)) {
+            if(strncmp(line, "** Alert", 8) == 0) {
+                if(alert) {
+                    process_alert(alert);
+                    free(alert);
+                    alert = NULL;
+                    alert_len = 0;
+                }
             }
+            size_t l = strlen(line);
+            alert = realloc(alert, alert_len + l + 1);
+            if(!alert) {
+                fprintf(stderr, "Memory allocation failed\n");
+                break;
+            }
+            memcpy(alert + alert_len, line, l);
+            alert_len += l;
+            alert[alert_len] = '\0';
+        } else if(feof(f)) {
+            /* Handle log rotation */
+            struct stat st, cur;
+            static ino_t last_inode = 0;
+            if(last_inode == 0 && stat(ALERT_FILE_PATH, &st) == 0)
+                last_inode = st.st_ino;
+            if(stat(ALERT_FILE_PATH, &cur) == 0 && cur.st_ino != last_inode) {
+                fclose(f);
+                f = fopen(ALERT_FILE_PATH, "r");
+                if(!f) {
+                    sleep(1);
+                    continue;
+                }
+                last_inode = cur.st_ino;
+                fseek(f, 0, SEEK_END);
+                clearerr(f);
+                continue;
+            }
+            clearerr(f);
+            sleep(1);
+        } else {
+            /* Read error */
+            break;
         }
-        size_t l = strlen(line);
-        alert = realloc(alert, alert_len + l + 2);
-        memcpy(alert + alert_len, line, l);
-        alert_len += l;
-        alert[alert_len++] = '\n';
-        alert[alert_len] = '\0';
     }
+
     if(alert)
         process_alert(alert);
-
     free(alert);
-    free(file_data);
+    fclose(f);
     return 0;
 }
 
