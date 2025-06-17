@@ -110,7 +110,7 @@ static void parse_alert(const char *text, alert_info *info)
 {
     if(regex_extract(text, "[0-9]{4} [A-Z][a-z]{2} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} ([^ ]+)->", info->hostname, sizeof(info->hostname)) != 0)
         regex_extract(text, "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[+-][0-9]{2}:[0-9]{2})? ([^ ]+)", info->hostname, sizeof(info->hostname));
-    if(regex_extract(text, "->([^\\n]+)", info->logfile, sizeof(info->logfile)) != 0)
+    if(regex_extract(text, "->([^\\n]+?)\\s+Rule:", info->logfile, sizeof(info->logfile)) != 0)
         strcpy(info->logfile, "Unknown");
     if(regex_extract(text, "([0-9]{4} [A-Z][a-z]{2} [0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})", info->time, sizeof(info->time)) != 0)
         strcpy(info->time, "Unknown");
