@@ -18,9 +18,9 @@ using `libcurl` for SMTP. Compile it with:
 cd c_version && make
 ```
 
-The resulting `send_wazuh_mail` binary reads the alert log, builds an HTML
-email and sends it via your SMTP server. A sample systemd unit file is provided
-as `wazuh-mail-c.service`.
+The resulting `send_wazuh_mail` binary tails the alert log from the end,
+building an HTML email for each new alert and sending it via your SMTP
+server. A sample systemd unit file is provided as `wazuh-mail-c.service`.
 
 To test manually you can run:
 
@@ -28,7 +28,27 @@ To test manually you can run:
 ./c_version/send_wazuh_mail
 ```
 
-Ensure your SMTP settings in `send_wazuh_mail.c` match your environment.
+SMTP settings no longer need to be compiled in. Adjust them in the
+configuration file instead.
+
+### Configuration file
+
+The C program reads `wazuh-mail.conf` from `/opt/wazuh-mail` on startup.
+A sample configuration file is included in `c_version/wazuh-mail.conf`.
+It allows you to configure SMTP parameters and the minimum alert level
+that triggers an email notification:
+
+```ini
+smtp_server=smtp.example.com
+smtp_port=25
+email_from=wazuh@example.com
+email_to=support@example.com
+min_level=9
+```
+
+If a setting is missing or cannot be parsed, built-in defaults are used
+(server `smtp.example.com`, port `25`, sender `wazuh@example.com`,
+recipient `support@example.com`, and alert level `9`).
 
 ## Enabling the service
 
