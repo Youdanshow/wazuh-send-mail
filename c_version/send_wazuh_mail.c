@@ -5,6 +5,8 @@
 #include <curl/curl.h>
 #include <time.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #define DEFAULT_SMTP_SERVER "smtp.example.com"
 #define DEFAULT_SMTP_PORT 25
@@ -26,24 +28,6 @@ struct upload_status {
     size_t len;
     const char *data;
 };
-
-/* Helper to read entire file into memory */
-static char *read_file(const char *path, size_t *out_len)
-{
-    FILE *f = fopen(path, "r");
-    if(!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if(sz < 0) { fclose(f); return NULL; }
-    char *buf = malloc(sz + 1);
-    if(!buf) { fclose(f); return NULL; }
-    if(fread(buf, 1, sz, f) != (size_t)sz) { free(buf); fclose(f); return NULL; }
-    buf[sz] = '\0';
-    fclose(f);
-    if(out_len) *out_len = sz;
-    return buf;
-}
 
 /* Load configuration from CONFIG_FILE */
 static void load_config(void)
@@ -267,38 +251,69 @@ static int process_alert(const char *alert)
 int main(void)
 {
     load_config();
-    size_t len = 0;
-    char *file_data = read_file(ALERT_FILE_PATH, &len);
-    if(!file_data) {
-        fprintf(stderr, "Failed to read %s\n", ALERT_FILE_PATH);
+
+    FILE *f = fopen(ALERT_FILE_PATH, "r");
+    if(!f) {
+        fprintf(stderr, "Failed to open %s\n", ALERT_FILE_PATH);
         return 1;
     }
 
-    char *start = file_data;
-    char *line;
+    /* Start watching from the end of the file */
+    fseek(f, 0, SEEK_END);
+
     char *alert = NULL;
     size_t alert_len = 0;
-    for(line = strtok(start, "\n"); line; line = strtok(NULL, "\n")) {
-        if(strncmp(line, "** Alert", 8) == 0) {
-            if(alert) {
-                process_alert(alert);
-                free(alert);
-                alert = NULL;
-                alert_len = 0;
+    char line[4096];
+
+    while(1) {
+        if(fgets(line, sizeof(line), f)) {
+            if(strncmp(line, "** Alert", 8) == 0) {
+                if(alert) {
+                    process_alert(alert);
+                    free(alert);
+                    alert = NULL;
+                    alert_len = 0;
+                }
             }
+            size_t l = strlen(line);
+            alert = realloc(alert, alert_len + l + 1);
+            if(!alert) {
+                fprintf(stderr, "Memory allocation failed\n");
+                break;
+            }
+            memcpy(alert + alert_len, line, l);
+            alert_len += l;
+            alert[alert_len] = '\0';
+        } else if(feof(f)) {
+            /* Handle log rotation */
+            struct stat st, cur;
+            static ino_t last_inode = 0;
+            if(last_inode == 0 && stat(ALERT_FILE_PATH, &st) == 0)
+                last_inode = st.st_ino;
+            if(stat(ALERT_FILE_PATH, &cur) == 0 && cur.st_ino != last_inode) {
+                fclose(f);
+                f = fopen(ALERT_FILE_PATH, "r");
+                if(!f) {
+                    sleep(1);
+                    continue;
+                }
+                last_inode = cur.st_ino;
+                fseek(f, 0, SEEK_END);
+                clearerr(f);
+                continue;
+            }
+            clearerr(f);
+            sleep(1);
+        } else {
+            /* Read error */
+            break;
         }
-        size_t l = strlen(line);
-        alert = realloc(alert, alert_len + l + 2);
-        memcpy(alert + alert_len, line, l);
-        alert_len += l;
-        alert[alert_len++] = '\n';
-        alert[alert_len] = '\0';
     }
+
     if(alert)
         process_alert(alert);
-
     free(alert);
-    free(file_data);
+    fclose(f);
     return 0;
 }
 

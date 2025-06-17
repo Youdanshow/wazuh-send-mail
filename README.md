@@ -18,9 +18,9 @@ using `libcurl` for SMTP. Compile it with:
 cd c_version && make
 ```
 
-The resulting `send_wazuh_mail` binary reads the alert log, builds an HTML
-email and sends it via your SMTP server. A sample systemd unit file is provided
-as `wazuh-mail-c.service`.
+The resulting `send_wazuh_mail` binary tails the alert log from the end,
+building an HTML email for each new alert and sending it via your SMTP
+server. A sample systemd unit file is provided as `wazuh-mail-c.service`.
 
 To test manually you can run:
 
