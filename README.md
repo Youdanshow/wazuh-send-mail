@@ -29,3 +29,23 @@ To test manually you can run:
 ```
 
 Ensure your SMTP settings in `send_wazuh_mail.c` match your environment.
+
+## Enabling the service
+
+To run the mail notifier automatically, install one of the provided systemd
+unit files and enable it:
+
+```bash
+# For the Python implementation
+sudo ln -s /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
+# Or for the C implementation
+sudo ln -s /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable wazuh-mail.service    # or wazuh-mail-c.service
+sudo systemctl start wazuh-mail.service     # or wazuh-mail-c.service
+```
+
+The service expects the program files to be located in `/opt/wazuh-mail` as
+referenced in the unit files. Adjust the paths if you deploy the scripts
+elsewhere.
