@@ -1,0 +1,18 @@
+[Unit]
+Description=Service de notification Wazuh par mail
+After=network.target
+
+[Service]
+MemoryMax=200M
+CPUQuota=20%
+Type=simple
+User=root
+WorkingDirectory=/opt/wazuh-mail
+ExecStart=/opt/wazuh-mail/venv/bin/python3 /opt/wazuh-mail/send_wazuh_mail.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/wazuh-email.log
+StandardError=append:/var/log/wazuh-email.log
+
+[Install]
+WantedBy=multi-user.target
