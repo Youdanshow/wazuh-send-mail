@@ -6,16 +6,20 @@
 #include <time.h>
 #include <ctype.h>
 
-#define SMTP_SERVER "smtp.example.com"
-#define SMTP_PORT 25
-#define EMAIL_FROM "wazuh@example.com"
-#define EMAIL_TO "support@example.com"
+#define DEFAULT_SMTP_SERVER "smtp.example.com"
+#define DEFAULT_SMTP_PORT 25
+#define DEFAULT_EMAIL_FROM "wazuh@example.com"
+#define DEFAULT_EMAIL_TO "support@example.com"
 #define ALERT_FILE_PATH "/var/ossec/logs/alerts/alerts.log"
 
 #define MAX_LOG_LENGTH 15000
 #define CONFIG_FILE "/opt/wazuh-mail/wazuh-mail.conf"
 
 static int min_alert_level = 9;
+static char smtp_server[128] = DEFAULT_SMTP_SERVER;
+static int smtp_port = DEFAULT_SMTP_PORT;
+static char email_from[128] = DEFAULT_EMAIL_FROM;
+static char email_to[128] = DEFAULT_EMAIL_TO;
 
 struct upload_status {
     size_t bytes_read;
@@ -41,30 +45,48 @@ static char *read_file(const char *path, size_t *out_len)
     return buf;
 }
 
-/* Load configuration, currently only min_level from CONFIG_FILE */
+/* Load configuration from CONFIG_FILE */
 static void load_config(void)
 {
     FILE *f = fopen(CONFIG_FILE, "r");
     if(!f) return; /* use default */
 
-    char line[64];
+    char line[256];
     while(fgets(line, sizeof(line), f)) {
         char *p = line;
         while(isspace((unsigned char)*p)) p++;
         if(*p == '#' || *p == '\0')
             continue;
-        if(strncmp(p, "min_level", 9) == 0) {
-            p += 9;
-            while(*p && (*p == ' ' || *p == '\t' || *p == '=')) p++;
-            int lvl = atoi(p);
+        char *eq = strchr(p, '=');
+        if(!eq) continue;
+        *eq++ = '\0';
+        char *key = p;
+        char *value = eq;
+        while(*value && isspace((unsigned char)*value)) value++;
+        key[strcspn(key, " \t\r\n")] = '\0';
+        value[strcspn(value, "\r\n")] = '\0';
+
+        if(strcmp(key, "min_level") == 0) {
+            int lvl = atoi(value);
             if(lvl > 0)
                 min_alert_level = lvl;
-            break;
-        } else if(isdigit((unsigned char)*p)) {
-            int lvl = atoi(p);
+        } else if(strcmp(key, "smtp_server") == 0) {
+            strncpy(smtp_server, value, sizeof(smtp_server) - 1);
+            smtp_server[sizeof(smtp_server)-1] = '\0';
+        } else if(strcmp(key, "smtp_port") == 0) {
+            int port = atoi(value);
+            if(port > 0)
+                smtp_port = port;
+        } else if(strcmp(key, "email_from") == 0) {
+            strncpy(email_from, value, sizeof(email_from) - 1);
+            email_from[sizeof(email_from)-1] = '\0';
+        } else if(strcmp(key, "email_to") == 0) {
+            strncpy(email_to, value, sizeof(email_to) - 1);
+            email_to[sizeof(email_to)-1] = '\0';
+        } else if(isdigit((unsigned char)*key)) {
+            int lvl = atoi(key);
             if(lvl > 0)
                 min_alert_level = lvl;
-            break;
         }
     }
     fclose(f);
@@ -169,7 +191,7 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
              "Content-Type: text/html; charset=utf-8\r\n\r\n"
              "%s\r\n"
              "--%s--\r\n",
-             EMAIL_FROM, EMAIL_TO, info->subject, boundary,
+             email_from, email_to, info->subject, boundary,
              boundary, plain,
              boundary, html,
              boundary);
@@ -201,12 +223,16 @@ static int send_email_payload(const char *payload, size_t payload_len)
     if(!curl) return -1;
     CURLcode res = CURLE_OK;
     char url[256];
-    snprintf(url, sizeof(url), "smtp://%s:%d", SMTP_SERVER, SMTP_PORT);
+    snprintf(url, sizeof(url), "smtp://%s:%d", smtp_server, smtp_port);
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, "<" EMAIL_FROM ">");
+    char from[160];
+    snprintf(from, sizeof(from), "<%s>", email_from);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
 
     struct curl_slist *recipients = NULL;
-    recipients = curl_slist_append(recipients, "<" EMAIL_TO ">");
+    char to[160];
+    snprintf(to, sizeof(to), "<%s>", email_to);
+    recipients = curl_slist_append(recipients, to);
     curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
 
     struct upload_status upload_ctx = {0, payload_len, payload};

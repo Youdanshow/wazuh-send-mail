@@ -28,21 +28,27 @@ To test manually you can run:
 ./c_version/send_wazuh_mail
 ```
 
-Ensure your SMTP settings in `send_wazuh_mail.c` match your environment.
+SMTP settings no longer need to be compiled in. Adjust them in the
+configuration file instead.
 
 ### Configuration file
 
 The C program reads `wazuh-mail.conf` from `/opt/wazuh-mail` on startup.
 A sample configuration file is included in `c_version/wazuh-mail.conf`.
-This file allows you to set the minimum alert level that triggers an
-email notification:
+It allows you to configure SMTP parameters and the minimum alert level
+that triggers an email notification:
 
 ```ini
+smtp_server=smtp.example.com
+smtp_port=25
+email_from=wazuh@example.com
+email_to=support@example.com
 min_level=9
 ```
 
-If the file is missing or the value cannot be parsed, level `9` is used
-by default.
+If a setting is missing or cannot be parsed, built-in defaults are used
+(server `smtp.example.com`, port `25`, sender `wazuh@example.com`,
+recipient `support@example.com`, and alert level `9`).
 
 ## Enabling the service
 
