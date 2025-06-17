@@ -33,6 +33,7 @@ Ensure your SMTP settings in `send_wazuh_mail.c` match your environment.
 ### Configuration file
 
 The C program reads `wazuh-mail.conf` from `/opt/wazuh-mail` on startup.
+A sample configuration file is included in `c_version/wazuh-mail.conf`.
 This file allows you to set the minimum alert level that triggers an
 email notification:
 
