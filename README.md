@@ -46,14 +46,14 @@ Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
 2. Activez l'une des unités systemd fournies :
    - Version Python :
      ```bash
-     sudo ln -s /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
+    sudo cp /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
      sudo systemctl daemon-reload
      sudo systemctl enable wazuh-mail.service
      sudo systemctl start wazuh-mail.service
      ```
    - Version C :
      ```bash
-     sudo ln -s /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
+    sudo cp /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
      sudo systemctl daemon-reload
      sudo systemctl enable wazuh-mail-c.service
      sudo systemctl start wazuh-mail-c.service
