@@ -3,6 +3,7 @@
 #include <string.h>
 #include <regex.h>
 #include <curl/curl.h>
+#include <strings.h>
 #include <time.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -11,7 +12,7 @@
 #define DEFAULT_SMTP_SERVER "smtp.example.com"
 #define DEFAULT_SMTP_PORT 25
 #define DEFAULT_EMAIL_FROM "wazuh@example.com"
-#define DEFAULT_EMAIL_TO "support@example.com"
+#define DEFAULT_EMAIL_TO "admin@example.com"
 #define ALERT_FILE_PATH "/var/ossec/logs/alerts/alerts.log"
 
 #define MAX_LOG_LENGTH 15000
@@ -22,6 +23,9 @@ static char smtp_server[128] = DEFAULT_SMTP_SERVER;
 static int smtp_port = DEFAULT_SMTP_PORT;
 static char email_from[128] = DEFAULT_EMAIL_FROM;
 static char email_to[128] = DEFAULT_EMAIL_TO;
+
+typedef enum { SMTP_SEC_NONE, SMTP_SEC_SSL, SMTP_SEC_STARTTLS } smtp_sec_t;
+static smtp_sec_t smtp_security = SMTP_SEC_NONE;
 
 struct upload_status {
     size_t bytes_read;
@@ -86,6 +90,13 @@ static void load_config(void)
             int port = atoi(value);
             if(port > 0)
                 smtp_port = port;
+        } else if(strcmp(key, "smtp_security") == 0) {
+            if(strcasecmp(value, "ssl") == 0)
+                smtp_security = SMTP_SEC_SSL;
+            else if(strcasecmp(value, "starttls") == 0)
+                smtp_security = SMTP_SEC_STARTTLS;
+            else
+                smtp_security = SMTP_SEC_NONE;
         } else if(strcmp(key, "email_from") == 0) {
             strncpy(email_from, value, sizeof(email_from) - 1);
             email_from[sizeof(email_from)-1] = '\0';
@@ -144,9 +155,80 @@ static void parse_alert(const char *text, alert_info *info)
     if(regex_extract(text, "Rule: [0-9]+ \\(level [0-9]+\\) -> '([^']*)'", info->rule_desc, sizeof(info->rule_desc)) != 0)
         strcpy(info->rule_desc, "Wazuh Alert");
     snprintf(info->subject, sizeof(info->subject), "[Wazuh] %s", info->rule_desc);
+    for(char *p = info->subject; *p; ++p)
+        if(*p == '\r' || *p == '\n') *p = ' ';
 }
 
 /* Build MIME email payload with plain text and HTML */
+static char *base64_encode(const unsigned char *data, size_t len)
+{
+    static const char table[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_len = ((len + 2) / 3) * 4;
+    char *out = malloc(out_len + 1);
+    if(!out) return NULL;
+    char *p = out;
+    for(size_t i = 0; i < len; i += 3) {
+        unsigned int n = data[i] << 16;
+        if(i + 1 < len) n |= data[i+1] << 8;
+        if(i + 2 < len) n |= data[i+2];
+        *p++ = table[(n >> 18) & 63];
+        *p++ = table[(n >> 12) & 63];
+        *p++ = (i + 1 < len) ? table[(n >> 6) & 63] : '=';
+        *p++ = (i + 2 < len) ? table[n & 63] : '=';
+    }
+    *p = '\0';
+    return out;
+}
+
+/* Escape &, <, >, ' and " for safe HTML output */
+static char *html_escape(const char *text)
+{
+    size_t len = 0;
+    for(const char *p = text; *p; ++p) {
+        switch(*p) {
+            case '&': len += 5; break;      /* &amp; */
+            case '<':
+            case '>': len += 4; break;      /* &lt; &gt; */
+            case '"': len += 6; break;      /* &quot; */
+            case '\'': len += 5; break;    /* &#39; */
+            default: len++; break;
+        }
+    }
+    char *out = malloc(len + 1);
+    if(!out) return NULL;
+    char *o = out;
+    for(const char *p = text; *p; ++p) {
+        switch(*p) {
+            case '&': memcpy(o, "&amp;", 5); o += 5; break;
+            case '<': memcpy(o, "&lt;", 4); o += 4; break;
+            case '>': memcpy(o, "&gt;", 4); o += 4; break;
+            case '"': memcpy(o, "&quot;", 6); o += 6; break;
+            case '\'': memcpy(o, "&#39;", 5); o += 5; break;
+            default: *o++ = *p; break;
+        }
+    }
+    *o = '\0';
+    return out;
+}
+
+static char *load_file_base64(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if(!f) return NULL;
+    if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long len = ftell(f);
+    if(len < 0) { fclose(f); return NULL; }
+    rewind(f);
+    unsigned char *buf = malloc(len);
+    if(!buf) { fclose(f); return NULL; }
+    if(fread(buf, 1, len, f) != (size_t)len) { free(buf); fclose(f); return NULL; }
+    fclose(f);
+    char *b64 = base64_encode(buf, len);
+    free(buf);
+    return b64;
+}
+
 static char *build_email(const alert_info *info, const char *log, size_t *payload_len)
 {
     const char *boundary = "----=_wazuh_mail_boundary";
@@ -167,35 +249,89 @@ static char *build_email(const alert_info *info, const char *log, size_t *payloa
     char *normalized = normalize_newlines(log_copy);
     if(!normalized) { free(log_copy); return NULL; }
 
-    size_t plain_extra = truncated ? strlen("\r\n\r\n[Log automatically truncated for email compatibility]") : 0;
+    char *hostname_e = html_escape(info->hostname);
+    char *logfile_e = html_escape(info->logfile);
+    char *time_e = html_escape(info->time);
+    char *rule_e = html_escape(info->rule_desc);
+    char *log_html = html_escape(log_copy);
+    if(!hostname_e || !logfile_e || !time_e || !rule_e || !log_html) {
+        free(log_copy); free(normalized);
+        free(hostname_e); free(logfile_e); free(time_e); free(rule_e); free(log_html);
+        return NULL;
+    }
+
+    size_t plain_extra = truncated ? strlen("\r\n\r\n[Log potentiellement tronqué automatiquement pour compatibilité email]") : 0;
     plain = malloc(strlen(normalized) + plain_extra + 1);
-    html = malloc(log_len + 512);
+    size_t html_sz = snprintf(NULL, 0,
+        "<html>\n"
+        "<body style=\"font-family:Arial,sans-serif;\">\n"
+        "    <h2 style=\"color:#e60000;\">Alerte Wazuh</h2>\n"
+        "    <p style=\"font-size:16px;\">\n"
+        "        <strong>Niveau :</strong> %s<br>\n"
+        "        <strong>Détail :</strong> <em>%s</em><br>\n"
+        "        <strong>Quand :</strong> %s<br>\n"
+        "        <strong>Hostname :</strong> %s<br>\n"
+        "        <strong>Fichier log :</strong> %s\n"
+        "    </p>\n"
+        "    <div style=\"background-color:#f9f9f9;padding:10px;border-left:4px solid #e60000;margin-top:10px; max-height:400px; overflow:auto;\">\n"
+        "        <div style=\"font-size:13px; font-family:monospace; white-space:pre-wrap; overflow-x:auto; word-break:break-word; line-height:1.4; margin:0;\">%.*s</div>\n"
+        "    </div>\n"
+        "    <p style=\"color:#888;margin-top:8px;\"><em>Log potentiellement tronqu\xC3\xA9 automatiquement pour compatibilit\xC3\xA9 email</em></p>\n"
+        "</body>\n"
+        "</html>\n",
+        info->level, rule_e, time_e, hostname_e, logfile_e,
+        (int)log_len, log_html) + 1;
+    
+    html = malloc(html_sz);
     if(!plain || !html) { free(log_copy); free(normalized); free(plain); free(html); return NULL; }
     strcpy(plain, normalized);
     if(truncated)
-        strcat(plain, "\r\n\r\n[Log automatically truncated for email compatibility]");
+        strcat(plain, "\r\n\r\n[Log potentiellement tronqué automatiquement pour compatibilité email]");
 
-    snprintf(html, log_len + 512,
+    snprintf(html, html_sz,
         "<html>\n"
         "<body style=\"font-family:Arial,sans-serif;\">\n"
-        "<h2 style=\"color:#e60000;\">Wazuh Alert</h2>\n"
-        "<p><strong>Level:</strong> %s<br>\n"
-        "<strong>Detail:</strong> <em>%s</em><br>\n"
-        "<strong>When:</strong> %s<br>\n"
-        "<strong>Hostname:</strong> %s<br>\n"
-        "<strong>Log file:</strong> %s</p>\n"
-        "<div style=\"background-color:#f9f9f9;padding:10px;border-left:4px solid #e60000;margin-top:10px; max-height:400px; overflow:auto;\">\n"
-        "<div style=\"font-family:monospace; white-space:pre-wrap;\">%.*s</div>\n"
-        "</div>\n%s"
-        "</body></html>\n",
-        info->level, info->rule_desc, info->time, info->hostname, info->logfile,
-        (int)log_len, log_copy,
-        truncated ? "<p style=\"color:#888;margin-top:8px;\"><em>[Log automatically truncated for email compatibility]</em></p>" : "");
+        "    <h2 style=\"color:#e60000;\">Alerte Wazuh</h2>\n"
+        "    <p style=\"font-size:16px;\">\n"
+        "        <strong>Niveau :</strong> %s<br>\n"
+        "        <strong>Détail :</strong> <em>%s</em><br>\n"
+        "        <strong>Quand :</strong> %s<br>\n"
+        "        <strong>Hostname :</strong> %s<br>\n"
+        "        <strong>Fichier log :</strong> %s\n"
+        "    </p>\n"
+        "    <div style=\"background-color:#f9f9f9;padding:10px;border-left:4px solid #e60000;margin-top:10px; max-height:400px; overflow:auto;\">\n"
+        "        <div style=\"font-size:13px; font-family:monospace; white-space:pre-wrap; overflow-x:auto; word-break:break-word; line-height:1.4; margin:0;\">%.*s</div>\n"
+        "    </div>\n"
+        "    <p style=\"color:#888;margin-top:8px;\"><em>Log potentiellement tronqu\xC3\xA9 automatiquement pour compatibilit\xC3\xA9 email</em></p>\n"
+        "</body>\n"
+        "</html>\n",
+        info->level, rule_e, time_e, hostname_e, logfile_e,
+        (int)log_len, log_html);
 
     free(log_copy);
     free(normalized);
+    free(hostname_e); free(logfile_e); free(time_e); free(rule_e); free(log_html);
 
-    size_t size = strlen(info->subject) + strlen(plain) + strlen(html) + 512;
+    int needed = snprintf(NULL, 0,
+             "From: %s\r\n"
+             "To: %s\r\n"
+             "Subject: %s\r\n"
+             "MIME-Version: 1.0\r\n"
+             "Content-Type: multipart/alternative; boundary=%s\r\n"
+             "\r\n"
+             "--%s\r\n"
+             "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+             "%s\r\n"
+             "--%s\r\n"
+             "Content-Type: text/html; charset=utf-8\r\n\r\n"
+             "%s\r\n"
+             "--%s--\r\n",
+             email_from, email_to, info->subject, boundary,
+             boundary, plain,
+             boundary, html,
+             boundary);
+    if(needed < 0) { free(plain); free(html); return NULL; }
+    size_t size = (size_t)needed + 1;
     char *payload = malloc(size);
     if(!payload) { free(plain); free(html); return NULL; }
 
@@ -245,8 +381,13 @@ static int send_email_payload(const char *payload, size_t payload_len)
     if(!curl) return -1;
     CURLcode res = CURLE_OK;
     char url[256];
-    snprintf(url, sizeof(url), "smtp://%s:%d", smtp_server, smtp_port);
+    if(smtp_security == SMTP_SEC_SSL)
+        snprintf(url, sizeof(url), "smtps://%s:%d", smtp_server, smtp_port);
+    else
+        snprintf(url, sizeof(url), "smtp://%s:%d", smtp_server, smtp_port);
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if(smtp_security == SMTP_SEC_STARTTLS)
+        curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
     char from[160];
     snprintf(from, sizeof(from), "<%s>", email_from);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
