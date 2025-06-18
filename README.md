@@ -1,71 +1,62 @@
 # wazuh-send-mail
-This project contains scripts that process Wazuh alerts and automatically send
-them by email. The original implementation is written in Python, but an
-optimised C version is also provided.
 
-Features:
-- Parsing Wazuh alert logs
-- Truncating large logs for better readability
-- Sending formatted HTML emails
+Ce projet fournit deux programmes permettant d'envoyer automatiquement par courriel les alertes générées par Wazuh. Une version en **Python** et une version plus légère en **C** sont disponibles.
 
-Python version: 3.12.3
+## Fonctionnalités communes
+- Surveillance du fichier `alerts.log` de Wazuh en temps réel
+- Extraction des informations principales (hôte, fichier concerné, niveau, description)
+- Envoi d'un courriel en texte et HTML
+- Niveau minimum d'alerte configurable via un fichier `.conf`
 
-## C version
-The `c_version` directory contains a lightweight implementation written in C
-using `libcurl` for SMTP. Compile it with:
+## Version Python
+- Script : `python_version/send_wazuh_mail.py`
+- Compatible Python 3.12, sans dépendance externe
+- Exemple de configuration : `python_version/wazuh-mail.conf`
+- Unité systemd fournie : `python_version/wazuh-mail.service`
 
+Exécution manuelle :
+```bash
+python3 python_version/send_wazuh_mail.py
+```
+
+## Version C
+- Code source : `c_version/send_wazuh_mail.c`
+- Utilise **libcurl** pour l'envoi SMTP
+- Compilation :
 ```bash
 cd c_version && make
 ```
+- Exemple de configuration : `c_version/wazuh-mail.conf`
+- Unité systemd : `c_version/wazuh-mail-c.service`
 
-The resulting `send_wazuh_mail` binary tails the alert log from the end,
-building an HTML email for each new alert and sending it via your SMTP
-server. A sample systemd unit file is provided as `wazuh-mail-c.service`.
-
-To test manually you can run:
-
-```bash
-./c_version/send_wazuh_mail
-```
-
-SMTP settings no longer need to be compiled in. Adjust them in the
-configuration file instead.
-
-### Configuration file
-
-The C program reads `wazuh-mail.conf` from `/opt/wazuh-mail` on startup.
-A sample configuration file is included in `c_version/wazuh-mail.conf`.
-It allows you to configure SMTP parameters and the minimum alert level
-that triggers an email notification:
-
+## Fichier de configuration
+Les fichiers `wazuh-mail.conf` définissent les paramètres SMTP et le niveau minimal déclenchant l'envoi d'un message :
 ```ini
 smtp_server=smtp.example.com
 smtp_port=25
+smtp_security=none   # none, starttls ou ssl
 email_from=wazuh@example.com
-email_to=support@example.com
+email_to=admin@example.com
 min_level=9
 ```
+Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
 
-If a setting is missing or cannot be parsed, built-in defaults are used
-(server `smtp.example.com`, port `25`, sender `wazuh@example.com`,
-recipient `support@example.com`, and alert level `9`).
+## Installation comme service
+1. Placez le répertoire du projet dans `/opt/wazuh-mail`
+2. Activez l'une des unités systemd fournies :
+   - Version Python :
+     ```bash
+     sudo ln -s /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
+     sudo systemctl daemon-reload
+     sudo systemctl enable wazuh-mail.service
+     sudo systemctl start wazuh-mail.service
+     ```
+   - Version C :
+     ```bash
+     sudo ln -s /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
+     sudo systemctl daemon-reload
+     sudo systemctl enable wazuh-mail-c.service
+     sudo systemctl start wazuh-mail-c.service
+     ```
 
-## Enabling the service
-
-To run the mail notifier automatically, install one of the provided systemd
-unit files and enable it:
-
-```bash
-# For the Python implementation
-sudo ln -s /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
-# Or for the C implementation
-sudo ln -s /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable wazuh-mail.service    # or wazuh-mail-c.service
-sudo systemctl start wazuh-mail.service     # or wazuh-mail-c.service
-```
-
-The service expects the program files to be located in `/opt/wazuh-mail` as
-referenced in the unit files. Adjust the paths if you deploy the scripts
-elsewhere.
+Les journaux sont écrits dans `/var/log/wazuh-email.log`. Adaptez les chemins si nécessaire selon votre installation.
