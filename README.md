@@ -51,6 +51,8 @@ Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
      sudo systemctl enable wazuh-mail.service
      sudo systemctl start wazuh-mail.service
      ```
+1. Placez le répertoire du projet dans `/opt/wazuh-mail-c`
+2. Activez l'une des unités systemd fournies :
    - Version C :
      ```bash
      sudo cp /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
