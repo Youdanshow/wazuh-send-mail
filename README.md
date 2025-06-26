@@ -58,6 +58,11 @@ python3 python_version/send_wazuh_mail.py
    usermod -aG wazuh wazuh-mail
    ```
 
+Exécution manuelle :
+```bash
+./send
+```
+
 - Fichier de configuation : `wazuh-mail.conf`
 - Unité systemd : `/etc/systemd/system/wazuh-mail-c.service`
 
@@ -77,7 +82,6 @@ min_level=9
 2. Activez l'une des unités systemd fournies :
    - Version Python :
      ```bash
-     sudo cp /opt/wazuh-mail/python_version/wazuh-mail.service /etc/systemd/system/wazuh-mail.service
      sudo systemctl daemon-reload
      sudo systemctl enable wazuh-mail.service
      sudo systemctl start wazuh-mail.service
@@ -87,7 +91,6 @@ min_level=9
 2. Activez l'une des unités systemd fournies :
    - Version C :
      ```bash
-     sudo cp /opt/wazuh-mail/c_version/wazuh-mail-c.service /etc/systemd/system/wazuh-mail-c.service
      sudo systemctl daemon-reload
      sudo systemctl enable wazuh-mail-c.service
      sudo systemctl start wazuh-mail-c.service
