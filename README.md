@@ -14,6 +14,24 @@ Ce projet fournit deux programmes permettant d'envoyer automatiquement par courr
 - Exemple de configuration : `python_version/wazuh-mail.conf`
 - Unité systemd fournie : `python_version/wazuh-mail.service`
 
+- Clonner le projet
+   ```bash
+   git clone https://github.com/Youdanshow/wazuh-send-mail/
+   ```
+- Setup
+   ```bash
+   sudo mkdir /opt/wazuh-mail
+   cd /wazuh-send-mail/python_version
+   cp * /opt/wazuh-mail
+   cp wazuh-mail.service /etc/systemd/system/
+   ```
+   
+- Création d’un utilisateur `wazuh-mail`
+   ```bash
+   useradd --system --no-create-home --shell /usr/sbin/nologin wazuh-mail
+   usermod -aG wazuh wazuh-mail
+   ```
+
 Exécution manuelle :
 ```bash
 python3 python_version/send_wazuh_mail.py
@@ -31,6 +49,7 @@ python3 python_version/send_wazuh_mail.py
    sudo mkdir /opt/wazuh-mail-c
    cd /wazuh-send-mail/c_version
    cp * /opt/wazuh-mail-c
+   cp wazuh-mail-c.service /etc/systemd/system/
    sudo make
    ```
 - Création d’un utilisateur `wazuh-mail`
@@ -39,8 +58,8 @@ python3 python_version/send_wazuh_mail.py
    usermod -aG wazuh wazuh-mail
    ```
 
-- fichier de configuation : `wazuh-mail.conf`
-- Unité systemd : `c_version/wazuh-mail-c.service`
+- Fichier de configuation : `wazuh-mail.conf`
+- Unité systemd : `/etc/systemd/system/wazuh-mail-c.service`
 
 ## Fichier de configuration
 Les fichiers `wazuh-mail.conf` définissent les paramètres SMTP et le niveau minimal déclenchant l'envoi d'un message :
@@ -52,7 +71,6 @@ email_from=wazuh@example.com
 email_to=admin@example.com
 min_level=9
 ```
-Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
 
 ## Installation comme service (Python)
 1. Placez le répertoire du projet dans `/opt/wazuh-mail`
