@@ -41,7 +41,7 @@ min_level=9
 ```
 Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
 
-## Installation comme service
+## Installation comme service (Python)
 1. Placez le répertoire du projet dans `/opt/wazuh-mail`
 2. Activez l'une des unités systemd fournies :
    - Version Python :
@@ -51,6 +51,7 @@ Copiez ce fichier dans `/opt/wazuh-mail/` pour qu'il soit chargé au démarrage.
      sudo systemctl enable wazuh-mail.service
      sudo systemctl start wazuh-mail.service
      ```
+## Installation comme service (C)
 1. Placez le répertoire du projet dans `/opt/wazuh-mail-c`
 2. Activez l'une des unités systemd fournies :
    - Version C :
