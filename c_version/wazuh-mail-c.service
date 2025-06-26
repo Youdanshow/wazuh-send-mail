@@ -3,16 +3,33 @@ Description=Service de notification Wazuh par mail (version C)
 After=network.target
 
 [Service]
-MemoryMax=50M
-CPUQuota=10%
 Type=simple
-User=root
-WorkingDirectory=/opt/wazuh-mail
-ExecStart=/opt/wazuh-mail/send_wazuh_mail
-Restart=on-failure
-RestartSec=5s
+User=wazuh-mail
+Group=wazuh
+SupplementaryGroups=wazuh
+WorkingDirectory=/opt/wazuh-mail-c
+ExecStart=/opt/wazuh-mail-c/send_wazuh_mail
+
+# Journaux
 StandardOutput=append:/var/log/wazuh-email.log
 StandardError=append:/var/log/wazuh-email.log
+
+# Redémarrage automatique
+Restart=on-failure
+RestartSec=5s
+
+# Limites de ressources
+MemoryMax=20M
+CPUQuota=10%
+
+# Durcissement systemd
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=true
+ProtectProc=invisible
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET
 
 [Install]
 WantedBy=multi-user.target
