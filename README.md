@@ -22,11 +22,24 @@ python3 python_version/send_wazuh_mail.py
 ## Version C
 - Code source : `c_version/send_wazuh_mail.c`
 - Utilise **libcurl** pour l'envoi SMTP
-- Compilation :
-```bash
-cd c_version && make
-```
-- Exemple de configuration : `c_version/wazuh-mail.conf`
+- Clonner le projet
+   ```bash
+   git clone https://github.com/Youdanshow/wazuh-send-mail/
+   ```
+- Compilation
+   ```bash
+   sudo mkdir /opt/wazuh-mail-c
+   cd /wazuh-send-mail/c_version
+   cp * /opt/wazuh-mail-c
+   sudo make
+   ```
+- Création d’un utilisateur `wazuh-mail`
+   ```bash
+   useradd --system --no-create-home --shell /usr/sbin/nologin wazuh-mail
+   usermod -aG wazuh wazuh-mail
+   ```
+
+- fichier de configuation : `wazuh-mail.conf`
 - Unité systemd : `c_version/wazuh-mail-c.service`
 
 ## Fichier de configuration
