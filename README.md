@@ -60,7 +60,7 @@ python3 python_version/send_wazuh_mail.py
 
 Exécution manuelle :
 ```bash
-./send
+./send-wazuh-mail
 ```
 
 - Fichier de configuation : `wazuh-mail.conf`
