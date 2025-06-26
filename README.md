@@ -1,6 +1,6 @@
 # wazuh-send-mail
 
-Ce projet fournit deux programmes permettant d'envoyer automatiquement par courriel les alertes générées par Wazuh. Une version en **Python** et une version plus légère en **C** sont disponibles.
+Ce projet fournit deux programmes permettant d'envoyer automatiquement par courriel les alertes générées par Wazuh. Une version en **Python** et une version plus légère en **C** sont disponibles. Je recommande la version en **C**.
 
 ## Fonctionnalités communes
 - Surveillance du fichier `alerts.log` de Wazuh en temps réel
