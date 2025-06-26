@@ -31,6 +31,15 @@ Ce projet fournit deux programmes permettant d'envoyer automatiquement par courr
    useradd --system --no-create-home --shell /usr/sbin/nologin wazuh-mail
    usermod -aG wazuh wazuh-mail
    ```
+- Gestion des droits
+   ```bash
+   chown -R wazuh-mail:wazuh-mail /opt/wazuh-mail
+   chmod 750 /opt/wazuh-mail/send_wazuh_mail.py
+   chmod 640 /opt/wazuh-mail/wazuh-mail.conf
+   touch /var/log/wazuh-email.log
+   chown wazuh-mail:wazuh /var/log/wazuh-email.log
+   chmod 640 /var/log/wazuh-email.log
+   ```
 
 Exécution manuelle :
 ```bash
@@ -56,6 +65,16 @@ python3 python_version/send_wazuh_mail.py
    ```bash
    useradd --system --no-create-home --shell /usr/sbin/nologin wazuh-mail
    usermod -aG wazuh wazuh-mail
+   ```
+
+- Gestion des droits
+   ```bash
+   chown -R wazuh-mail:wazuh-mail /opt/wazuh-mail-c
+   chmod 750 /opt/wazuh-mail-c/send_wazuh_mail
+   chmod 640 /opt/wazuh-mail-c/wazuh-mail.conf
+   touch /var/log/wazuh-email.log
+   chown wazuh-mail:wazuh /var/log/wazuh-email.log
+   chmod 640 /var/log/wazuh-email.log
    ```
 
 Exécution manuelle :
